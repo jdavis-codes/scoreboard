@@ -36,5 +36,5 @@ void setup() {
     ota_manager_setup();
 }
 void loop() {
-    ota_manager_loop();
+    vTaskDelay(pdMS_TO_TICKS(10));
 }

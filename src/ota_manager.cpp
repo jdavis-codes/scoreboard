@@ -1,6 +1,8 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <ArduinoOTA.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 
 #include "ota_manager.h"
 #include "secrets.h"
@@ -46,6 +48,16 @@ void wait_for_wifi() {
     }
 }
 
+void ota_task(void *) {
+    for (;;) {
+        if (WiFi.status() == WL_CONNECTED) {
+            ArduinoOTA.handle();
+        }
+        // Yield so the idle task can run and reset the watchdog.
+        vTaskDelay(pdMS_TO_TICKS(5));
+    }
+}
+
 }  // namespace
 
 void ota_manager_setup() {
@@ -62,7 +74,14 @@ void ota_manager_setup() {
     });
 
     ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
-        Serial.printf("[OTA] Progress: %u%%\r", (progress * 100U) / total);
+        // Serial writes block when no USB host is reading; skip them then,
+        // and throttle so we're not printing on every chunk.
+        static uint32_t last_ms = 0;
+        uint32_t now = millis();
+        if (Serial && now - last_ms >= 250) {
+            Serial.printf("[OTA] Progress: %u%%\r", (progress * 100U) / total);
+            last_ms = now;
+        }
     });
 
     ArduinoOTA.onError([](ota_error_t error) {
@@ -71,12 +90,6 @@ void ota_manager_setup() {
 
     ArduinoOTA.begin();
     Serial.printf("[OTA] Ready. Hostname: %s.local\n", OTA_HOSTNAME);
-}
 
-void ota_manager_loop() {
-    if (WiFi.status() == WL_CONNECTED) {
-        ArduinoOTA.handle();
-    }
-    // Yield so the idle task can run and reset the watchdog.
-    delay(2);
+    xTaskCreate(&ota_task, "ota_task", configMINIMAL_STACK_SIZE * 4, NULL, 1, NULL);
 }
