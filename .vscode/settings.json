@@ -1,0 +1,52 @@
+{
+    "platformio-ide.autoRebuildAutocompleteIndex": false,
+    "platformio-ide.autoCloseSerialMonitor": true,
+    "platformio-ide.activateProjectOnTextEditorChange": true,
+    "platformio-ide.toolbar": [
+        {
+            "text": "$(check)",
+            "tooltip": "Build",
+            "commands": "platformio-ide.build"
+        },
+        {
+            "text": "$(arrow-right)",
+            "tooltip": "Upload and Monitor",
+            "commands": "platformio-ide.uploadAndMonitor"
+        },
+        {
+            "text": "$(beaker)",
+            "tooltip": "Test",
+            "commands": "platformio-ide.test"
+        },
+        {
+            "text": "$(trash)",
+            "tooltip": "Clean",
+            "commands": "platformio-ide.clean"
+        },
+        {
+            "text": "$(flame)",
+            "tooltip": "Full clean (removes all build artifacts and sdkconfig)",
+            "commands": [
+                {
+                    "id": "platformio-ide.runPIOCoreCommand",
+                    "args": "pio run -t fullclean"
+                }
+            ]
+        },
+        {
+            "text": "$(plug)",
+            "tooltip": "Serial Monitor",
+            "commands": "platformio-ide.serialMonitor"
+        },
+        {
+            "text": "$(terminal)",
+            "tooltip": "PlatformIO Core CLI",
+            "commands": "platformio-ide.openPIOCoreCLI"
+        },
+        {
+            "text": "$(sync)",
+            "tooltip": "Rebuild IntelliSense & Debug Config (for active env)",
+            "commands": "platformio-ide.rebuildProjectIndex"
+        },
+    ],
+}
