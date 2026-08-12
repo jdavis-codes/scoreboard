@@ -11,6 +11,8 @@
 
 namespace {
 
+volatile bool s_ota_in_progress = false;
+
 void wait_for_wifi() {
     WiFi.mode(WIFI_STA);
     for (const auto& cred : wifi_credentials) {
@@ -25,6 +27,7 @@ void wait_for_wifi() {
         Serial.println();
 
         if (WiFi.status() == WL_CONNECTED) {
+            WiFi.setSleep(false);
             Serial.printf("[OTA] Connected to WiFi SSID: %s. IP: %s\n", cred.ssid, WiFi.localIP().toString().c_str());
             return;
         } else {
@@ -41,6 +44,7 @@ void wait_for_wifi() {
     Serial.println();
 
     if (WiFi.status() == WL_CONNECTED) {
+        WiFi.setSleep(false);
         Serial.print("[OTA] Connected. IP: ");
         Serial.println(WiFi.localIP());
     } else {
@@ -53,8 +57,7 @@ void ota_task(void *) {
         if (WiFi.status() == WL_CONNECTED) {
             ArduinoOTA.handle();
         }
-        // Yield so the idle task can run and reset the watchdog.
-        vTaskDelay(pdMS_TO_TICKS(5));
+        vTaskDelay(pdMS_TO_TICKS(s_ota_in_progress ? 1 : 10));
     }
 }
 
@@ -66,25 +69,19 @@ void ota_manager_setup() {
     ArduinoOTA.setHostname(OTA_HOSTNAME);
 
     ArduinoOTA.onStart([]() {
+        s_ota_in_progress = true;
         Serial.println("[OTA] Start");
     });
 
     ArduinoOTA.onEnd([]() {
+        s_ota_in_progress = false;
         Serial.println("[OTA] End");
     });
 
-    ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
-        // Serial writes block when no USB host is reading; skip them then,
-        // and throttle so we're not printing on every chunk.
-        static uint32_t last_ms = 0;
-        uint32_t now = millis();
-        if (Serial && now - last_ms >= 250) {
-            Serial.printf("[OTA] Progress: %u%%\r", (progress * 100U) / total);
-            last_ms = now;
-        }
-    });
+    ArduinoOTA.onProgress([](unsigned int, unsigned int) {});
 
     ArduinoOTA.onError([](ota_error_t error) {
+        s_ota_in_progress = false;
         Serial.printf("\n[OTA] Error[%u]\n", static_cast<unsigned>(error));
     });
 
