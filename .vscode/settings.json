@@ -14,6 +14,16 @@
             "commands": "platformio-ide.uploadAndMonitor"
         },
         {
+            "text": "$(radio-tower)",
+            "tooltip": "OTA Upload",
+            "commands": [
+                {
+                    "id": "platformio-ide.runPIOCoreCommand",
+                    "args": "pio run -e ota -t upload"
+                }
+            ]
+        },
+        {
             "text": "$(beaker)",
             "tooltip": "Test",
             "commands": "platformio-ide.test"
