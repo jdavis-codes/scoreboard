@@ -60,4 +60,6 @@ void ota_manager_loop() {
     if (WiFi.status() == WL_CONNECTED) {
         ArduinoOTA.handle();
     }
+    // Yield so the idle task can run and reset the watchdog.
+    delay(2);
 }
