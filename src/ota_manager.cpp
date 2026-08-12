@@ -11,7 +11,24 @@ namespace {
 
 void wait_for_wifi() {
     WiFi.mode(WIFI_STA);
-    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+    for (const auto& cred : wifi_credentials) {
+        Serial.printf("[OTA] Trying to connect to WiFi SSID: %s\n", cred.ssid);
+        WiFi.begin(cred.ssid, cred.password);
+
+        uint32_t start_ms = millis();
+        while (WiFi.status() != WL_CONNECTED && millis() - start_ms < 10000) {
+            delay(500);
+            Serial.print('.');
+        }
+        Serial.println();
+
+        if (WiFi.status() == WL_CONNECTED) {
+            Serial.printf("[OTA] Connected to WiFi SSID: %s. IP: %s\n", cred.ssid, WiFi.localIP().toString().c_str());
+            return;
+        } else {
+            Serial.printf("[OTA] Failed to connect to WiFi SSID: %s. Trying next credentials...\n", cred.ssid);
+        }
+    }
 
     Serial.print("[OTA] Connecting to WiFi");
     uint32_t start_ms = millis();
