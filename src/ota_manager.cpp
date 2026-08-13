@@ -5,16 +5,33 @@
 #include <freertos/task.h>
 
 #include "ota_manager.h"
+#include "led_strip.h"
 #include "secrets.h"
 
 #define OTA_HOSTNAME "scoreboard"
+
+bool NO_CONNECTION = true; // Set to true to disable OTA and WiFi connection attempts
 
 namespace {
 
 volatile bool s_ota_in_progress = false;
 
+void scanNetworks() {
+    Serial.println("[OTA] Scanning for WiFi networks...");
+    int n = WiFi.scanNetworks();
+    if (n == 0) {
+        Serial.println("[OTA] No networks found.");
+    } else {
+        Serial.printf("[OTA] %d networks found:\n", n);
+        for (int i = 0; i < n; ++i) {
+            Serial.printf("  %d: %s (RSSI: %d dBm)\n", i + 1, WiFi.SSID(i).c_str(), WiFi.RSSI(i));
+        }
+    }
+}
+
 void wait_for_wifi() {
     WiFi.mode(WIFI_STA);
+    scanNetworks();
     for (const auto& cred : wifi_credentials) {
         Serial.printf("[OTA] Trying to connect to WiFi SSID: %s\n", cred.ssid);
         WiFi.begin(cred.ssid, cred.password);
@@ -27,6 +44,7 @@ void wait_for_wifi() {
         Serial.println();
 
         if (WiFi.status() == WL_CONNECTED) {
+            stopBootCylonTask();
             WiFi.setSleep(false);
             Serial.printf("[OTA] Connected to WiFi SSID: %s. IP: %s\n", cred.ssid, WiFi.localIP().toString().c_str());
             return;
@@ -37,18 +55,20 @@ void wait_for_wifi() {
 
     Serial.print("[OTA] Connecting to WiFi");
     uint32_t start_ms = millis();
-    while (WiFi.status() != WL_CONNECTED && millis() - start_ms < 30000) {
+    while (WiFi.status() != WL_CONNECTED && millis() - start_ms < 10000) {
         delay(500);
         Serial.print('.');
     }
     Serial.println();
 
     if (WiFi.status() == WL_CONNECTED) {
+        stopBootCylonTask();
         WiFi.setSleep(false);
         Serial.print("[OTA] Connected. IP: ");
         Serial.println(WiFi.localIP());
     } else {
         Serial.println("[OTA] WiFi connection timeout. OTA disabled until reconnect.");
+        NO_CONNECTION = true;
     }
 }
 

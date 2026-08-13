@@ -5,10 +5,11 @@
 #include <Arduino.h>
 
 #include "ota_manager.h"
+#include "led_strip.h"
 
 #define BLINK_GPIO ((gpio_num_t) 46)
 
-void blink_task(void *pvParameter)
+void blinkTask(void *pvParameter)
 {
     /* Configure the IOMUX register for pad BLINK_GPIO (some pads are
        muxed to GPIO on reset already, but some default to other
@@ -31,9 +32,17 @@ void blink_task(void *pvParameter)
 
 void setup() {
     Serial.begin(115200);
-    xTaskCreate(&blink_task, "blink_task", configMINIMAL_STACK_SIZE, NULL, 5, NULL);
+    Serial.setTxTimeoutMs(0); // avoid task stalls when USB serial host is not connected
+    xTaskCreate(&blinkTask, "blinkTask", configMINIMAL_STACK_SIZE, NULL, 5, NULL);
+
+    setupStrip();
+    startBootCylonTask(); // spins until stopped by ota_manager_setup() on WiFi connect
+
     pinMode(LED_BUILTIN, OUTPUT);
     ota_manager_setup();
+
+    stopBootCylonTask(); // safety net in case WiFi never connected
+    xTaskCreate(&stripTask, "stripTask", 4096, NULL, 5, NULL);
 }
 void loop() {
     vTaskDelay(pdMS_TO_TICKS(10));
