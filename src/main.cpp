@@ -6,6 +6,7 @@
 
 #include "ota_manager.h"
 #include "led_strip.h"
+#include "buttons.h"
 
 #define BLINK_GPIO ((gpio_num_t) 46)
 
@@ -36,13 +37,19 @@ void setup() {
     xTaskCreate(&blinkTask, "blinkTask", configMINIMAL_STACK_SIZE, NULL, 5, NULL);
 
     setupStrip();
+    setupButtons();
+
     startBootCylonTask(); // spins until stopped by ota_manager_setup() on WiFi connect
 
     pinMode(LED_BUILTIN, OUTPUT);
     ota_manager_setup();
 
     stopBootCylonTask(); // safety net in case WiFi never connected
+
+    xTaskCreate(&buttonTask, "buttonTask", 3072, NULL, 5, NULL);
+
     xTaskCreate(&stripTask, "stripTask", 4096, NULL, 5, NULL);
+    
 }
 void loop() {
     vTaskDelay(pdMS_TO_TICKS(10));

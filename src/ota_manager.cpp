@@ -49,6 +49,7 @@ void wait_for_wifi() {
             Serial.printf("[OTA] Connected to WiFi SSID: %s. IP: %s\n", cred.ssid, WiFi.localIP().toString().c_str());
             return;
         } else {
+            WiFi.disconnect(true);
             Serial.printf("[OTA] Failed to connect to WiFi SSID: %s. Trying next credentials...\n", cred.ssid);
         }
     }

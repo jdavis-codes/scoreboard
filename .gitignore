@@ -10,3 +10,4 @@ include/secrets.h
 sdkconfig*
 !sdkconfig.defaults
 managed_components
+scoreboard.code-workspace
