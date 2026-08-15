@@ -4,15 +4,16 @@
 
 // Define Pins (Adjust GPIOs according to your board layout)
 
-#define BTN1_R_PIN   D11
-#define BTN1_G_PIN   D10
-#define BTN1_B_PIN   D9
-#define BTN1_PIN     D8
+#define BTN1_R_PIN   A0
+#define BTN1_G_PIN   A1
+#define BTN1_B_PIN   A2
+#define BTN1_PIN     A3
 
-#define BTN2_R_PIN   A0
-#define BTN2_G_PIN   A1
-#define BTN2_B_PIN   A2
-#define BTN2_PIN     A3
+#define BTN2_R_PIN   D11 
+#define BTN2_G_PIN   D10
+#define BTN2_B_PIN   D9
+#define BTN2_PIN     D8
+
 
 #define DEBOUNCE_TIME_MS 30
 #define LONG_PRESS_TIME_MS 5000
