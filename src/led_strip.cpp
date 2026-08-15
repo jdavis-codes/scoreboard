@@ -2,6 +2,7 @@
 #include <Adafruit_NeoPixel.h>
 #include <gama.h>
 #include "score_event.h"
+#include "game_mode_event.h"
 
 // Define segment geometry BEFORE the header so it uses these values
 #define SEGMENT_PIXELS 6
@@ -37,6 +38,9 @@ constexpr int AWAY_TENS = AWAY_ONES + PIXELS_PER_DIGIT;
 constexpr int AWAY_MINUS = AWAY_TENS + PIXELS_PER_DIGIT; // segment 29
 constexpr bool USE_RAINBOW_CYLON = true;
 
+constexpr int STROBE_INTERVAL = 100; // milliseconds between strobe color switches in RAVE mode
+constexpr unsigned long EVENT_DURATION_MS = 6000; // transient event duration
+
 // Perimeter of a "0": segments A,B,C,D,E,F clockwise, middle segment G excluded
 constexpr int RING_LEN = 6 * SEGMENT_PIXELS;
 
@@ -66,6 +70,15 @@ struct Score
 Score homeScore;
 Score awayScore;
 
+// Game mode state
+char current_mode[16] = "NORMAL";
+char active_event[16] = "";
+unsigned long event_end_time = 0;
+
+// For RAVE mode
+unsigned long last_rave_switch = 0;
+bool rave_show_home = true;
+
 // forward declarations
 void printScore(Score &home, Score &away);
 void displayScores(Score &home, Score &away);
@@ -82,25 +95,62 @@ void setupStrip()
 void stripTask(void *pvParameter)
 {
   initScoreQueue();
+  initGameModeQueue();
 
   while (1)
   {
-    ScoreMessage msg;
+    ScoreMessage scoreMsg;
+    GameModeMessage modeMsg;
 
-    if (xQueueReceive(scoreQueue, &msg, portMAX_DELAY) == pdTRUE)
+    // Non-blocking check for game mode updates
+    if (xQueueReceive(gameModeQueue, &modeMsg, 0) == pdTRUE) {
+      Serial.printf("[Game Mode] Received update: mode=%s, event=%s, triggered_at=%s\n", modeMsg.current_mode, modeMsg.active_event, modeMsg.event_triggered_at);
+
+        strncpy(current_mode, modeMsg.current_mode, sizeof(current_mode) - 1);
+      current_mode[sizeof(current_mode) - 1] = '\0';
+        strncpy(active_event, modeMsg.active_event, sizeof(active_event) - 1);
+      active_event[sizeof(active_event) - 1] = '\0';
+        
+        if (strlen(modeMsg.event_triggered_at) > 0) {
+            // Simple ISO 8601 to epoch conversion - only handles the time part for simplicity
+            int hours, mins, secs;
+            if (sscanf(modeMsg.event_triggered_at, "%*d-%*d-%*dT%d:%d:%d", &hours, &mins, &secs) == 3) {
+          unsigned long event_start_millis = (hours * 3600 + mins * 60 + secs) * 1000;
+                event_end_time = millis() + EVENT_DURATION_MS;
+          Serial.printf("[Game Mode] Parsed trigger time h=%d m=%d s=%d (ms=%lu). Event %s active until millis=%lu\n",
+                  hours, mins, secs, event_start_millis, active_event, event_end_time);
+        } else {
+          Serial.printf("[Game Mode] Failed to parse event_triggered_at='%s' for event=%s\n",
+                  modeMsg.event_triggered_at,
+                  active_event);
+            }
+        } else {
+            event_end_time = 0;
+        }
+
+      Serial.printf("[Game Mode] Applied state current_mode=%s active_event=%s event_end_time=%lu now=%lu\n",
+              current_mode,
+              active_event,
+              event_end_time,
+              millis());
+    }
+
+    // Non-blocking check for score updates
+    if (xQueueReceive(scoreQueue, &scoreMsg, 0) == pdTRUE)
     {
-      if (msg.target == SCORE_TARGET_HOME || msg.target == SCORE_TARGET_BOTH)
+      int oldHome = homeScore.value;
+      if (scoreMsg.target == SCORE_TARGET_HOME || scoreMsg.target == SCORE_TARGET_BOTH)
       {
-        switch (msg.action)
+        switch (scoreMsg.action)
         {
         case SCORE_ACTION_INCREMENT:
-          homeScore.value += (msg.value != 0 ? msg.value : 1);
+          homeScore.value += (scoreMsg.value != 0 ? scoreMsg.value : 1);
           break;
         case SCORE_ACTION_DECREMENT:
-          homeScore.value -= (msg.value != 0 ? msg.value : 1);
+          homeScore.value -= (scoreMsg.value != 0 ? scoreMsg.value : 1);
           break;
         case SCORE_ACTION_SET:
-          homeScore.value = msg.value;
+          homeScore.value = scoreMsg.value;
           break;
         case SCORE_ACTION_RESET:
           homeScore.value = 0;
@@ -108,18 +158,19 @@ void stripTask(void *pvParameter)
         }
       }
 
-      if (msg.target == SCORE_TARGET_AWAY || msg.target == SCORE_TARGET_BOTH)
+      int oldAway = awayScore.value;
+      if (scoreMsg.target == SCORE_TARGET_AWAY || scoreMsg.target == SCORE_TARGET_BOTH)
       {
-        switch (msg.action)
+        switch (scoreMsg.action)
         {
         case SCORE_ACTION_INCREMENT:
-          awayScore.value += (msg.value != 0 ? msg.value : 1);
+          awayScore.value += (scoreMsg.value != 0 ? scoreMsg.value : 1);
           break;
         case SCORE_ACTION_DECREMENT:
-          awayScore.value -= (msg.value != 0 ? msg.value : 1);
+          awayScore.value -= (scoreMsg.value != 0 ? scoreMsg.value : 1);
           break;
         case SCORE_ACTION_SET:
-          awayScore.value = msg.value;
+          awayScore.value = scoreMsg.value;
           break;
         case SCORE_ACTION_RESET:
           awayScore.value = 0;
@@ -127,14 +178,14 @@ void stripTask(void *pvParameter)
         }
       }
 
-      bool homeChanged = (msg.target == SCORE_TARGET_HOME || msg.target == SCORE_TARGET_BOTH);
-      bool awayChanged = (msg.target == SCORE_TARGET_AWAY || msg.target == SCORE_TARGET_BOTH);
-
       homeScore.value %= 100;
       awayScore.value %= 100;
 
+      bool homeChanged = (homeScore.value != oldHome);
+      bool awayChanged = (awayScore.value != oldAway);
+
       // Send local changes to queue for database transmission
-      if (!msg.isWeb && supabaseQueue != NULL) {
+      if (!scoreMsg.isWeb && supabaseQueue != NULL) {
           ScoreUpdate update = { static_cast<int16_t>(homeScore.value), static_cast<int16_t>(awayScore.value) };
           xQueueSend(supabaseQueue, &update, 0);
       }
@@ -157,10 +208,11 @@ void stripTask(void *pvParameter)
         bootCylon(5, 8, 20, false, 1);
       }
 
-      printScore(homeScore, awayScore);
-
-      displayScores(homeScore, awayScore);
+      // printScore(homeScore, awayScore);
     }
+    
+    // Always call displayScores to handle animations and modes
+    displayScores(homeScore, awayScore);
   }
 }
 
@@ -335,43 +387,126 @@ static void renderMinus(int ledBase, bool on, uint32_t color)
     strip.setPixelColor(ledBase + i, on ? color : offColorP);
 }
 
+static void renderDigitRainbow(const Segment &seg, int ledBase, uint32_t time_offset)
+{
+  for (int p = 0; p < PIXELS_PER_DIGIT; ++p) {
+    if (seg.pixels[p]) {
+      uint16_t hue = ((ledBase + p) * 300 + time_offset) % 65536;
+      strip.setPixelColor(ledBase + p, strip.gamma32(strip.ColorHSV(hue, 255, 255)));
+    } else {
+      strip.setPixelColor(ledBase + p, offColorP);
+    }
+  }
+}
+
+static void renderMinusRainbow(int ledBase, bool on, uint32_t time_offset)
+{
+    for (int i = 0; i < SEGMENT_PIXELS; ++i) {
+        if (on) {
+            uint16_t hue = ((ledBase + i) * 300 + time_offset) % 65536;
+            strip.setPixelColor(ledBase + i, strip.gamma32(strip.ColorHSV(hue, 255, 255)));
+        } else {
+            strip.setPixelColor(ledBase + i, offColorP);
+        }
+    }
+}
+
 void displayScores(Score &home, Score &away)
 {
-  // update the negative flags based on the score values
-  home.isNegative = (home.value < 0);
-  away.isNegative = (away.value < 0);
+  static bool prevFireworksActive = false;
+  static bool prevGayActive = false;
+  bool fireworksActive = (strcmp(active_event, "FIREWORKS") == 0 && millis() < event_end_time);
+  bool gayActive = (strcmp(active_event, "GAY") == 0 && millis() < event_end_time);
 
-  // Render absolute values on 2 digits; minus signs are rendered separately.
-  int homeDisplay = home.value;
-  if (homeDisplay < 0)
-    homeDisplay = -homeDisplay;
-  homeDisplay %= 100;
+  if (fireworksActive != prevFireworksActive) {
+    Serial.printf("[Event] FIREWORKS %s (active_event=%s now=%lu end=%lu)\n",
+            fireworksActive ? "START" : "END",
+            active_event,
+            millis(),
+            event_end_time);
+    prevFireworksActive = fireworksActive;
+  }
+  if (gayActive != prevGayActive) {
+    Serial.printf("[Event] GAY %s (active_event=%s now=%lu end=%lu)\n",
+            gayActive ? "START" : "END",
+            active_event,
+            millis(),
+            event_end_time);
+    prevGayActive = gayActive;
+  }
 
-  int awayDisplay = away.value;
-  if (awayDisplay < 0)
-    awayDisplay = -awayDisplay;
-  awayDisplay %= 100;
+    if (strcmp(active_event, "FIREWORKS") == 0 && millis() < event_end_time) {
+      unsigned long time_since_event_start = EVENT_DURATION_MS - (event_end_time - millis());
+        int block_size;
+      if (time_since_event_start < 1000) block_size = 6;
+      else if (time_since_event_start < 2000) block_size = 5;
+      else if (time_since_event_start < 3000) block_size = 4;
+      else if (time_since_event_start < 4000) block_size = 3;
+      else if (time_since_event_start < 5000) block_size = 2;
+        else block_size = 1;
 
-  snprintf(home.text, sizeof(home.text), "%02d", homeDisplay);
-  snprintf(away.text, sizeof(away.text), "%02d", awayDisplay);
+        strip.clear();
+        
+        int num_sparks = 1 + (6 - block_size) * 3; // Increased spark count
+        for (int i = 0; i < num_sparks; i++) {
+            int start_led = random(LED_COUNT - block_size + 1);
+            for (int j = 0; j < block_size; j++) {
+                strip.setPixelColor(start_led + j, strip.Color(255, 255, 255, 255));
+            }
+        }
+        strip.show();
+        delay(50); // Added delay for animation speed control
+        return;
+    }
 
-  // Update the segments for home score
-  UpdateSegmentFromChar(home.digit0, home.text[0]);
-  UpdateSegmentFromChar(home.digit1, home.text[1]);
-  // Update the segments for away score
-  UpdateSegmentFromChar(away.digit0, away.text[0]);
-  UpdateSegmentFromChar(away.digit1, away.text[1]);
+    home.isNegative = (home.value < 0);
+    away.isNegative = (away.value < 0);
+    int homeDisplay = abs(home.value) % 100;
+    int awayDisplay = abs(away.value) % 100;
+    snprintf(home.text, sizeof(home.text), "%02d", homeDisplay);
+    snprintf(away.text, sizeof(away.text), "%02d", awayDisplay);
+    UpdateSegmentFromChar(home.digit0, home.text[0]);
+    UpdateSegmentFromChar(home.digit1, home.text[1]);
+    UpdateSegmentFromChar(away.digit0, away.text[0]);
+    UpdateSegmentFromChar(away.digit1, away.text[1]);
 
-  renderDigit(home.digit1, HOME_ONES, homeColorP); // text[1] = ones
-  renderDigit(home.digit0, HOME_TENS, homeDisplay < 10 ? offColorP : homeColorP); // blank tens for single digits
-  renderDigit(away.digit1, AWAY_ONES, awayColorP);
-  renderDigit(away.digit0, AWAY_TENS, awayDisplay < 10 ? offColorP : awayColorP);
-  renderMinus(HOME_MINUS, home.isNegative, homeColorP);
-  renderMinus(AWAY_MINUS, away.isNegative, awayColorP);
-  strip.show();
+    if (strcmp(current_mode, "RAVE") == 0) {
+        if (millis() - last_rave_switch > 150) {
+            last_rave_switch = millis();
+            rave_show_home = !rave_show_home;
+        }
+        renderDigit(home.digit1, HOME_ONES, rave_show_home ? homeColorP : offColorP);
+        renderDigit(home.digit0, HOME_TENS, rave_show_home && homeDisplay >= 10 ? homeColorP : offColorP);
+        renderMinus(HOME_MINUS, rave_show_home && home.isNegative, homeColorP);
+        
+        renderDigit(away.digit1, AWAY_ONES, !rave_show_home ? awayColorP : offColorP);
+        renderDigit(away.digit0, AWAY_TENS, !rave_show_home && awayDisplay >= 10 ? awayColorP : offColorP);
+        renderMinus(AWAY_MINUS, !rave_show_home && away.isNegative, awayColorP);
+    } else {
+        renderDigit(home.digit1, HOME_ONES, homeColorP);
+        renderDigit(home.digit0, HOME_TENS, homeDisplay < 10 ? offColorP : homeColorP);
+        renderMinus(HOME_MINUS, home.isNegative, homeColorP);
 
-  // Combine the pixel data from home and away, plus an extra minus sign segment for each score.
+        renderDigit(away.digit1, AWAY_ONES, awayColorP);
+        renderDigit(away.digit0, AWAY_TENS, awayDisplay < 10 ? offColorP : awayColorP);
+        renderMinus(AWAY_MINUS, away.isNegative, awayColorP);
+    }
+
+    if (strcmp(active_event, "GAY") == 0 && millis() < event_end_time) {
+        uint32_t time_offset = (millis() % 5000) * (65536 / 5000);
+        renderDigitRainbow(home.digit1, HOME_ONES, time_offset);
+        renderDigitRainbow(home.digit0, HOME_TENS, time_offset);
+        renderMinusRainbow(HOME_MINUS, home.isNegative, time_offset);
+
+        renderDigitRainbow(away.digit1, AWAY_ONES, time_offset);
+        renderDigitRainbow(away.digit0, AWAY_TENS, time_offset);
+        renderMinusRainbow(AWAY_MINUS, away.isNegative, time_offset);
+    }
+
+    strip.show();
 }
+
+
 
 // Fill strip pixels one after another with a color. Strip is NOT cleared
 // first; anything there will be covered pixel by pixel. Pass in color
