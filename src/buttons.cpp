@@ -4,15 +4,15 @@
 
 // Define Pins (Adjust GPIOs according to your board layout)
 
-#define BTN1_R_PIN D11
-#define BTN1_G_PIN D10
-#define BTN1_B_PIN D9
-#define BTN1_PIN D8
+#define BTN1_R_PIN   D11
+#define BTN1_G_PIN   D10
+#define BTN1_B_PIN   D9
+#define BTN1_PIN     D8
 
-// #define BTN2_PIN       16
-// #define BTN2_R_PIN     17
-// #define BTN2_G_PIN     18
-// #define BTN2_B_PIN     19
+#define BTN2_R_PIN   A0
+#define BTN2_G_PIN   A1
+#define BTN2_B_PIN   A2
+#define BTN2_PIN     A3
 
 #define DEBOUNCE_TIME_MS 30
 #define LONG_PRESS_TIME_MS 5000
@@ -40,9 +40,9 @@ struct ButtonState
     uint32_t releaseTimeMs = 0;
     bool longPressFired = false;
 };
-
-static ButtonState buttons[1] = {
-    {BUTTON_HOME, BTN1_PIN, SCORE_TARGET_HOME}
+static ButtonState buttons[2] = {
+    {BUTTON_HOME, BTN1_PIN, SCORE_TARGET_HOME},
+    {BUTTON_AWAY, BTN2_PIN, SCORE_TARGET_AWAY}
 };
 
 static const size_t NUM_BUTTONS = sizeof(buttons) / sizeof(buttons[0]);
@@ -79,20 +79,20 @@ void setupButtons()
 {
     // Configure input pins
     pinMode(BTN1_PIN, INPUT_PULLUP);
-    // pinMode(BTN2_PIN, INPUT_PULLUP);
+    pinMode(BTN2_PIN, INPUT_PULLUP);
 
     // Configure PWM output channels for RGB LEDs using Arduino ESP32 LEDC API
     ledcAttachChannel(BTN1_R_PIN, LEDC_FREQ_HZ, LEDC_TIMER_BIT, 0);
     ledcAttachChannel(BTN1_G_PIN, LEDC_FREQ_HZ, LEDC_TIMER_BIT, 1);
     ledcAttachChannel(BTN1_B_PIN, LEDC_FREQ_HZ, LEDC_TIMER_BIT, 2);
 
-    // ledcAttachChannel(BTN2_R_PIN, LEDC_FREQ_HZ, LEDC_TIMER_BIT, 3);
-    // ledcAttachChannel(BTN2_G_PIN, LEDC_FREQ_HZ, LEDC_TIMER_BIT, 4);
-    // ledcAttachChannel(BTN2_B_PIN, LEDC_FREQ_HZ, LEDC_TIMER_BIT, 5);
+    ledcAttachChannel(BTN2_R_PIN, LEDC_FREQ_HZ, LEDC_TIMER_BIT, 3);
+    ledcAttachChannel(BTN2_G_PIN, LEDC_FREQ_HZ, LEDC_TIMER_BIT, 4);
+    ledcAttachChannel(BTN2_B_PIN, LEDC_FREQ_HZ, LEDC_TIMER_BIT, 5);
 
     // Default LED states (e.g., dim blue standby)
     setButtonColor(BUTTON_HOME, 0, 0, 30);
-    // setButtonColor(BUTTON_2, 0, 0, 30);
+    setButtonColor(BUTTON_AWAY, 0, 0, 30);
 
     // Ensure score queue exists and spawn task
     initScoreQueue();
