@@ -69,7 +69,8 @@ Score awayScore;
 // forward declarations
 void printScore(Score &home, Score &away);
 void displayScores(Score &home, Score &away);
-void bootCylon(uint16_t cycles = 3, uint8_t frameDelay = 18, int tail = 5, bool rainbow = false);
+// side: -1 = both, 0 = home only, 1 = away only
+void bootCylon(uint16_t cycles = 3, uint8_t frameDelay = 18, int tail = 5, bool rainbow = false, int8_t side = -1);
 
 void setupStrip()
 {
@@ -126,22 +127,39 @@ void stripTask(void *pvParameter)
         }
       }
 
+      bool homeChanged = (msg.target == SCORE_TARGET_HOME || msg.target == SCORE_TARGET_BOTH);
+      bool awayChanged = (msg.target == SCORE_TARGET_AWAY || msg.target == SCORE_TARGET_BOTH);
+
       homeScore.value %= 100;
       awayScore.value %= 100;
 
-      if (homeScore.value > 0 && homeScore.value % 99 == 0)
+      // Send local changes to queue for database transmission
+      if (!msg.isWeb && supabaseQueue != NULL) {
+          ScoreUpdate update = { static_cast<int16_t>(homeScore.value), static_cast<int16_t>(awayScore.value) };
+          xQueueSend(supabaseQueue, &update, 0);
+      }
+
+      if (homeChanged && homeScore.value > 0 && homeScore.value % 99 == 0)
       {
-        bootCylon(10, 26, 20, USE_RAINBOW_CYLON);
+        bootCylon(10, 26, 20, USE_RAINBOW_CYLON, 0);
+      }
+      if (awayChanged && awayScore.value > 0 && awayScore.value % 99 == 0)
+      {
+        bootCylon(10, 26, 20, USE_RAINBOW_CYLON, 1);
+      }
+
+      if (homeChanged && homeScore.value > 0 && homeScore.value % 10 == 0)
+      {
+        bootCylon(5, 8, 20, false, 0);
+      }
+      if (awayChanged && awayScore.value > 0 && awayScore.value % 10 == 0)
+      {
+        bootCylon(5, 8, 20, false, 1);
       }
 
       printScore(homeScore, awayScore);
 
       displayScores(homeScore, awayScore);
-
-      if (homeScore.value > 0 && homeScore.value % 10 == 0)
-      {
-        bootCylon(5, 8, 20);
-      }
     }
   }
 }
@@ -201,20 +219,35 @@ static void buildRing(int ring[RING_LEN])
     ring[n++] = i; // F: top-left, bottom->top
 }
 
-// Cylon comet sweeping around the "0" ring of every digit at boot.
-void bootCylon(uint16_t cycles, uint8_t frameDelay, int tail, bool rainbow)
+// Cylon comet sweeping around the "0" ring of every digit at boot (or one side, on score milestones).
+void bootCylon(uint16_t cycles, uint8_t frameDelay, int tail, bool rainbow, int8_t side)
 {
   int ring[RING_LEN];
   buildRing(ring);
 
-  const int digitBases[4] = {HOME_ONES, HOME_TENS, AWAY_ONES, AWAY_TENS};
+  int digitBases[4];
+  int numDigits = 0;
+  if (side != 1)
+  {
+    digitBases[numDigits++] = HOME_ONES;
+    digitBases[numDigits++] = HOME_TENS;
+  }
+  if (side != 0)
+  {
+    digitBases[numDigits++] = AWAY_ONES;
+    digitBases[numDigits++] = AWAY_TENS;
+  }
 
   for (uint16_t c = 0; c < cycles; ++c)
   {
     for (int head = 0; head < RING_LEN; ++head)
     {
-      strip.clear();
-      for (int d = 0; d < 4; ++d)
+      // only blank the animated ring(s), leave the other score's digits lit
+      for (int d = 0; d < numDigits; ++d)
+        for (int i = 0; i < RING_LEN; ++i)
+          strip.setPixelColor(digitBases[d] + i, strip.Color(0, 0, 0, 0));
+
+      for (int d = 0; d < numDigits; ++d)
       {
         for (int t = 0; t <= tail; ++t)
         {
@@ -238,7 +271,9 @@ void bootCylon(uint16_t cycles, uint8_t frameDelay, int tail, bool rainbow)
     }
   }
 
-  strip.clear();
+  for (int d = 0; d < numDigits; ++d)
+    for (int i = 0; i < RING_LEN; ++i)
+      strip.setPixelColor(digitBases[d] + i, strip.Color(0, 0, 0, 0));
   strip.show();
 }
 
@@ -328,9 +363,9 @@ void displayScores(Score &home, Score &away)
   UpdateSegmentFromChar(away.digit1, away.text[1]);
 
   renderDigit(home.digit1, HOME_ONES, homeColorP); // text[1] = ones
-  renderDigit(home.digit0, HOME_TENS, homeColorP); // text[0] = tens
+  renderDigit(home.digit0, HOME_TENS, homeDisplay < 10 ? offColorP : homeColorP); // blank tens for single digits
   renderDigit(away.digit1, AWAY_ONES, awayColorP);
-  renderDigit(away.digit0, AWAY_TENS, awayColorP);
+  renderDigit(away.digit0, AWAY_TENS, awayDisplay < 10 ? offColorP : awayColorP);
   renderMinus(HOME_MINUS, home.isNegative, homeColorP);
   renderMinus(AWAY_MINUS, away.isNegative, awayColorP);
   strip.show();

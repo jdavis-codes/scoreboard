@@ -7,6 +7,7 @@
 #include "ota_manager.h"
 #include "led_strip.h"
 #include "buttons.h"
+#include "supabase_client.h"
 
 #define BLINK_GPIO ((gpio_num_t) 46)
 
@@ -45,6 +46,8 @@ void setup() {
     ota_manager_setup();
 
     stopBootCylonTask(); // safety net in case WiFi never connected
+
+    setupSupabase();
 
     xTaskCreate(&buttonTask, "buttonTask", 3072, NULL, 5, NULL);
 
